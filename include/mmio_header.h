@@ -1,5 +1,6 @@
 
 namespace mmio {
+
 enum class StorageTypes { undefined, dense, sparse };
 enum class DataTypes { undefined, real, integer, uinteger, complex, pattern };
 enum class MatrixTypes {
@@ -26,6 +27,10 @@ class Header {
       : stype(StorageTypes::undefined),
         dtype(DataTypes::undefined),
         mtype(MatrixTypes::undefined){};
+  friend std::istream &operator>>(std::istream &fin, Header &h) {
+    if (!fin) throw MMException(MMErrorList::readFileError);
+    
+  }
 };
 
 const std::string Header::MMstart = "%%matrixmarket";
@@ -43,4 +48,5 @@ const std::map<std::string, MatrixTypes> Header::matrixTypes = {
     {"symmetric", MatrixTypes::symmetric},
     {"hermitian", MatrixTypes::hermitian},
     {"skew-symmetric", MatrixTypes::skewSymmetric}};
+
 }  // namespace mmio

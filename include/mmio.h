@@ -2,6 +2,8 @@
 #define MMIO
 #include <string>
 #include <map>
+#include <iostream>
+#include <fstream>
 
 #include "mmio_exceptions.h"
 #include "mmio_header.h"
