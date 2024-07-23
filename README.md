@@ -8,3 +8,10 @@ Coordinate matrices format is described by three arrays:
 * ia - elements' rows' numbers, 
 * ja - elements column's numbers,
 * nnz - number of non-zero elements in the matrix.
+
+## CSR 
+Compressed Sparse Row format is specified by 4 arrays:
+* a - elements values, 
+* ia - numbers of the row's first element in the a, 
+* ja - elements column's numbers,
+* nnz - number of non-zero elements in the matrix.
