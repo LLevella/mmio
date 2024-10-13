@@ -14,4 +14,5 @@ Compressed Sparse Row format is specified by 4 arrays:
 * mtx - elements values, 
 * imtx - indexes of the row's first element in the a, 
 * jmtx - elements column's numbers,
+* n - martices' rows number 
 * nnz - number of non-zero elements in the matrix.
