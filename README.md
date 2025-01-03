@@ -28,7 +28,7 @@ It is specified by 3 arrays:
 
 ## CSM
 Compressed sparse mixed format is similar to the CSR and CSC formats, but upper triangle use CSC and lower use CRS formats. 
-It is specified by 3 arrays:
+It is specified by next arrays:
 * d - diagonal elements values,
 * l - elements values, 
 * il - indexes of the row's first element in the a, 
