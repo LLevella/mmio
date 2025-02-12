@@ -3,10 +3,11 @@ Library for Matrix Market reading, writing, analyzing, converting in popular spa
 
 ## COO 
 
-Coordinate matrices format is described by three arrays:
+Coordinate matrices format is described by 3 arrays:
 * mtx - elements values, 
 * imtx - elements' rows' indexes, 
 * jmtx - elements column's indexes,
+and 1 scalar:
 * nnz - number of non-zero elements in the matrix.
 
 ## CSR 
@@ -14,6 +15,7 @@ Compressed Sparse Row format is specified by 3 arrays:
 * mtx - elements values, 
 * imtx - indexes of the row's first element in the a, 
 * jmtx - elements column's indexes,
+and 2 scalars:
 * n - martices' rows number 
 * nnz - number of non-zero elements in the matrix.
 
@@ -23,6 +25,7 @@ It is specified by 3 arrays:
 * mtx - elements values, 
 * jmtx - indexes of the columns's first element in the a, 
 * imtx - elements row's indexes,
+and 2 scalars:
 * n - martices' columns number 
 * nnz - number of non-zero elements in the matrix.
 
@@ -36,7 +39,17 @@ It is specified by next arrays:
 * u - elements values, 
 * ju - indexes of the columns's first element in the a, 
 * iu - elements row's indexes,
+and scalars:
 * n - martices' rows number, 
 * m - martices' columns number, 
 * nnzl - number of non-zero elements in the low triangle of the matrix,
 * nnzu - number of non-zero elements in the upper triangle of the matrix,
+
+## Diagonal
+It is specified by 2 arrays:
+* d - diagonal's elements values,s
+* id - distances between minor diagonal and the main diagonal
+and 3 scalars:
+* n - martices' rows number, 
+* m - martices' columns number, 
+* nd - diagonals number,
