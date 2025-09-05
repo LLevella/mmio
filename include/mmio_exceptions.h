@@ -4,7 +4,7 @@
 #include <exception>
 
 namespace mmio {
-enum class MMErrorList { ok };
+enum class MMErrorList { ok, readFileError };
 
 class MMException : public std::exception {
   std::string m_error;
@@ -22,7 +22,8 @@ class MMException : public std::exception {
 };
 
 const std::map<MMErrorList, std::string> MMException::msg = {
-    {MMErrorList::ok, "Passed"}};
+    {MMErrorList::ok, "Passed"},
+    {MMErrorList::readFileError, "Couldn't read file"}};
 }  // namespace mmio
 
 #endif
