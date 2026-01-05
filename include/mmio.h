@@ -1,15 +1,8 @@
-#ifndef MMIO
-#define MMIO
-#include <string>
-#include <map>
-#include <iostream>
-#include <fstream>
-#include <functional>
-#include <algorithm>
-#include <cctype>
+#ifndef MMIO_H
+#define MMIO_H
 
-#include "mmio_functions.h"
 #include "mmio_exceptions.h"
+#include "mmio_functions.h"
 #include "mmio_header.h"
 #include "mmio_matrix.h"
 
