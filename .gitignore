@@ -1,3 +1,6 @@
 .vscode
 build/
+build-*/
 cmake-build-*/
+CMakeFiles/
+__pycache__/

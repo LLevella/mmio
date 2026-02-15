@@ -24,6 +24,26 @@ namespace mmio {
 
 enum class DuplicatePolicy { keep, sum };
 
+struct ReadOptions {
+  bool expand_symmetry = true;
+  DuplicatePolicy duplicate_policy = DuplicatePolicy::sum;
+};
+
+struct WriteOptions {
+  Header header;
+  DuplicatePolicy duplicate_policy = DuplicatePolicy::sum;
+  bool validate_symmetry = true;
+  bool triangular_output = true;
+};
+
+inline std::size_t CheckedProduct(std::size_t lhs, std::size_t rhs,
+                                  const std::string &context) {
+  if (lhs != 0 && rhs > std::numeric_limits<std::size_t>::max() / lhs) {
+    throw MMException(MMErrorList::invalidSize, context);
+  }
+  return lhs * rhs;
+}
+
 template <typename T>
 struct CooMatrix {
   std::size_t rows = 0;
@@ -88,6 +108,26 @@ struct CsrMatrix {
       throw MMException(MMErrorList::invalidSize,
                         "CSR row_ptr.back() must equal nnz");
     }
+    if (!row_ptr.empty() && row_ptr.front() != 0) {
+      throw MMException(MMErrorList::invalidSize,
+                        "CSR row_ptr.front() must be zero");
+    }
+    for (std::size_t row = 1; row < row_ptr.size(); ++row) {
+      if (row_ptr[row] < row_ptr[row - 1]) {
+        throw MMException(MMErrorList::invalidSize,
+                          "CSR row_ptr must be monotonic");
+      }
+      if (row_ptr[row] > values.size()) {
+        throw MMException(MMErrorList::invalidSize,
+                          "CSR row_ptr entry is outside values");
+      }
+    }
+    for (const auto col : col_indices) {
+      if (col >= cols) {
+        throw MMException(MMErrorList::invalidEntry,
+                          "CSR column index is outside matrix dimensions");
+      }
+    }
   }
 };
 
@@ -114,6 +154,26 @@ struct CscMatrix {
       throw MMException(MMErrorList::invalidSize,
                         "CSC col_ptr.back() must equal nnz");
     }
+    if (!col_ptr.empty() && col_ptr.front() != 0) {
+      throw MMException(MMErrorList::invalidSize,
+                        "CSC col_ptr.front() must be zero");
+    }
+    for (std::size_t col = 1; col < col_ptr.size(); ++col) {
+      if (col_ptr[col] < col_ptr[col - 1]) {
+        throw MMException(MMErrorList::invalidSize,
+                          "CSC col_ptr must be monotonic");
+      }
+      if (col_ptr[col] > values.size()) {
+        throw MMException(MMErrorList::invalidSize,
+                          "CSC col_ptr entry is outside values");
+      }
+    }
+    for (const auto row : row_indices) {
+      if (row >= rows) {
+        throw MMException(MMErrorList::invalidEntry,
+                          "CSC row index is outside matrix dimensions");
+      }
+    }
   }
 };
 
@@ -125,7 +185,10 @@ struct DenseMatrix {
 
   DenseMatrix() = default;
   DenseMatrix(std::size_t row_count, std::size_t col_count)
-      : rows(row_count), cols(col_count), values(row_count * col_count) {}
+      : rows(row_count),
+        cols(col_count),
+        values(CheckedProduct(row_count, col_count,
+                              "Dense matrix dimensions overflow")) {}
 
   T &operator()(std::size_t row, std::size_t col) {
     return values[row * cols + col];
@@ -136,7 +199,8 @@ struct DenseMatrix {
   }
 
   void validate() const {
-    if (values.size() != rows * cols) {
+    if (values.size() != CheckedProduct(rows, cols,
+                                        "Dense matrix dimensions overflow")) {
       throw MMException(MMErrorList::invalidSize,
                         "Dense values size must be rows * cols");
     }
@@ -308,6 +372,11 @@ inline bool IsZeroValue(const T &value) {
 }
 
 template <typename T>
+inline bool IsSameValue(const T &lhs, const T &rhs) {
+  return lhs == rhs;
+}
+
+template <typename T>
 struct CooEntry {
   std::size_t row = 0;
   std::size_t col = 0;
@@ -341,6 +410,31 @@ inline std::vector<CooEntry<T>> SortedEntries(const CooMatrix<T> &matrix,
     }
   }
   return combined;
+}
+
+template <typename T>
+inline std::vector<CooEntry<T>> MatrixEntriesInInputOrder(
+    const CooMatrix<T> &matrix) {
+  matrix.validate();
+
+  std::vector<CooEntry<T>> entries;
+  entries.reserve(matrix.nnz());
+  for (std::size_t i = 0; i < matrix.nnz(); ++i) {
+    entries.push_back(
+        {matrix.row_indices[i], matrix.col_indices[i], matrix.values[i]});
+  }
+  return entries;
+}
+
+template <typename T>
+inline std::vector<CooEntry<T>> SortedEntriesByRowColumn(
+    const CooMatrix<T> &matrix, DuplicatePolicy policy) {
+  return SortedEntries(
+      matrix,
+      [](const CooEntry<T> &lhs, const CooEntry<T> &rhs) {
+        return std::tie(lhs.row, lhs.col) < std::tie(rhs.row, rhs.col);
+      },
+      policy);
 }
 
 template <typename T>
@@ -447,6 +541,36 @@ inline CooMatrix<T> ToCOO(const DenseMatrix<T> &matrix) {
   return coo;
 }
 
+template <typename T>
+inline CooMatrix<T> ToCOO(const CsrMatrix<T> &matrix) {
+  matrix.validate();
+
+  CooMatrix<T> coo(matrix.rows, matrix.cols);
+  coo.reserve(matrix.nnz());
+  for (std::size_t row = 0; row < matrix.rows; ++row) {
+    for (std::size_t position = matrix.row_ptr[row];
+         position < matrix.row_ptr[row + 1]; ++position) {
+      coo.push_back(row, matrix.col_indices[position], matrix.values[position]);
+    }
+  }
+  return coo;
+}
+
+template <typename T>
+inline CooMatrix<T> ToCOO(const CscMatrix<T> &matrix) {
+  matrix.validate();
+
+  CooMatrix<T> coo(matrix.rows, matrix.cols);
+  coo.reserve(matrix.nnz());
+  for (std::size_t col = 0; col < matrix.cols; ++col) {
+    for (std::size_t position = matrix.col_ptr[col];
+         position < matrix.col_ptr[col + 1]; ++position) {
+      coo.push_back(matrix.row_indices[position], col, matrix.values[position]);
+    }
+  }
+  return coo;
+}
+
 inline Header MakeWriteHeader(StorageTypes storage_type, DataTypes data_type,
                               MatrixTypes matrix_type) {
   return Header(storage_type, data_type == DataTypes::undefined
@@ -497,6 +621,95 @@ inline void AddSymmetricEntry(CooMatrix<T> &matrix, std::size_t row,
       matrix.push_back(col, row, NegatedValue(value));
       return;
   }
+}
+
+template <typename T>
+inline T CounterpartValue(const T &value, MatrixTypes matrix_type) {
+  switch (matrix_type) {
+    case MatrixTypes::symmetric:
+      return value;
+    case MatrixTypes::hermitian:
+      return ConjugatedValue(value);
+    case MatrixTypes::skewSymmetric:
+      return NegatedValue(value);
+    case MatrixTypes::general:
+    case MatrixTypes::undefined:
+      return value;
+  }
+  return value;
+}
+
+template <typename T>
+inline const CooEntry<T> *FindSortedEntry(
+    const std::vector<CooEntry<T>> &entries, std::size_t row, std::size_t col) {
+  const CooEntry<T> needle{row, col, T{}};
+  const auto iter = std::lower_bound(
+      entries.begin(), entries.end(), needle,
+      [](const CooEntry<T> &lhs, const CooEntry<T> &rhs) {
+        return std::tie(lhs.row, lhs.col) < std::tie(rhs.row, rhs.col);
+      });
+  if (iter == entries.end() || iter->row != row || iter->col != col) {
+    return nullptr;
+  }
+  return &(*iter);
+}
+
+template <typename T>
+inline std::vector<CooEntry<T>> EntriesForCoordinateWrite(
+    const CooMatrix<T> &matrix, const Header &header,
+    const WriteOptions &options) {
+  if (header.matrix_type() == MatrixTypes::general ||
+      header.matrix_type() == MatrixTypes::undefined ||
+      !options.triangular_output) {
+    return MatrixEntriesInInputOrder(matrix);
+  }
+
+  if (matrix.rows != matrix.cols) {
+    throw MMException(MMErrorList::unsupportedSymmetry,
+                      "symmetric sparse matrices must be square");
+  }
+
+  const auto entries =
+      SortedEntriesByRowColumn(matrix, options.duplicate_policy);
+  std::vector<CooEntry<T>> writable;
+  writable.reserve(entries.size());
+
+  for (const auto &entry : entries) {
+    if (entry.row == entry.col) {
+      if (header.matrix_type() == MatrixTypes::skewSymmetric) {
+        if (!IsZeroValue(entry.value)) {
+          throw MMException(MMErrorList::invalidEntry,
+                            "skew-symmetric diagonal values must be zero");
+        }
+        continue;
+      }
+      writable.push_back(entry);
+      continue;
+    }
+
+    const auto counterpart =
+        FindSortedEntry(entries, entry.col, entry.row);
+    if (options.validate_symmetry && counterpart != nullptr) {
+      const auto expected = CounterpartValue(entry.value, header.matrix_type());
+      if (!IsSameValue(counterpart->value, expected)) {
+        throw MMException(MMErrorList::invalidEntry,
+                          "matrix values do not match requested symmetry");
+      }
+    }
+
+    if (entry.row > entry.col) {
+      writable.push_back(entry);
+      continue;
+    }
+
+    if (counterpart == nullptr) {
+      writable.push_back(
+          {entry.col, entry.row,
+           CounterpartValue(entry.value, header.matrix_type())});
+    }
+  }
+
+  return writable;
 }
 
 class DataTokenReader {
@@ -612,7 +825,8 @@ inline CooMatrix<T> ReadSparseBody(std::istream &input, const Header &header,
   const auto cols = ParseSizeToken(size_tokens[1], "sparse column count");
   const auto entry_count = ParseSizeToken(size_tokens[2], "sparse nnz");
   CooMatrix<T> result(rows, cols);
-  result.reserve(entry_count * (expand_symmetry ? 2 : 1));
+  result.reserve(CheckedProduct(entry_count, expand_symmetry ? 2 : 1,
+                                "sparse nnz reserve overflow"));
 
   const std::size_t expected_tokens =
       header.data_type() == DataTypes::pattern
@@ -642,23 +856,33 @@ inline CooMatrix<T> ReadSparseBody(std::istream &input, const Header &header,
 template <typename T>
 inline CooMatrix<T> ReadMatrixMarket(std::istream &input,
                                      Header *header_out = nullptr,
-                                     bool expand_symmetry = true) {
+                                     ReadOptions options = ReadOptions()) {
   Header header;
   input >> header;
   if (header_out != nullptr) *header_out = header;
 
   std::size_t line_number = 1;
   if (header.is_sparse()) {
-    return ReadSparseBody<T>(input, header, &line_number, expand_symmetry);
+    return ReadSparseBody<T>(input, header, &line_number,
+                             options.expand_symmetry);
   }
 
   return ToCOO(ReadDenseBody<T>(input, header, &line_number));
 }
 
 template <typename T>
+inline CooMatrix<T> ReadMatrixMarket(std::istream &input, Header *header_out,
+                                     bool expand_symmetry) {
+  ReadOptions options;
+  options.expand_symmetry = expand_symmetry;
+  return ReadMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
 inline DenseMatrix<T> ReadDenseMatrixMarket(std::istream &input,
                                             Header *header_out = nullptr,
-                                            bool expand_symmetry = true) {
+                                            ReadOptions options =
+                                                ReadOptions()) {
   Header header;
   input >> header;
   if (header_out != nullptr) *header_out = header;
@@ -669,44 +893,143 @@ inline DenseMatrix<T> ReadDenseMatrixMarket(std::istream &input,
   }
 
   return ToDense(ReadSparseBody<T>(input, header, &line_number,
-                                   expand_symmetry));
+                                   options.expand_symmetry),
+                 options.duplicate_policy);
+}
+
+template <typename T>
+inline DenseMatrix<T> ReadDenseMatrixMarket(std::istream &input,
+                                            Header *header_out,
+                                            bool expand_symmetry) {
+  ReadOptions options;
+  options.expand_symmetry = expand_symmetry;
+  return ReadDenseMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCSRMatrixMarket(std::istream &input,
+                                        Header *header_out = nullptr,
+                                        ReadOptions options = ReadOptions()) {
+  return ToCSR(ReadMatrixMarket<T>(input, header_out, options),
+               options.duplicate_policy);
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCsrMatrixMarket(std::istream &input,
+                                        Header *header_out = nullptr,
+                                        ReadOptions options = ReadOptions()) {
+  return ReadCSRMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCSCMatrixMarket(std::istream &input,
+                                        Header *header_out = nullptr,
+                                        ReadOptions options = ReadOptions()) {
+  return ToCSC(ReadMatrixMarket<T>(input, header_out, options),
+               options.duplicate_policy);
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCscMatrixMarket(std::istream &input,
+                                        Header *header_out = nullptr,
+                                        ReadOptions options = ReadOptions()) {
+  return ReadCSCMatrixMarket<T>(input, header_out, options);
 }
 
 template <typename T>
 inline CooMatrix<T> ReadMatrixMarketFile(const std::string &path,
                                          Header *header_out = nullptr,
-                                         bool expand_symmetry = true) {
+                                         ReadOptions options = ReadOptions()) {
   std::ifstream input(path);
   if (!input) throw MMException(MMErrorList::readFileError, path);
-  return ReadMatrixMarket<T>(input, header_out, expand_symmetry);
+  return ReadMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline CooMatrix<T> ReadMatrixMarketFile(const std::string &path,
+                                         Header *header_out,
+                                         bool expand_symmetry) {
+  ReadOptions options;
+  options.expand_symmetry = expand_symmetry;
+  return ReadMatrixMarketFile<T>(path, header_out, options);
 }
 
 template <typename T>
 inline DenseMatrix<T> ReadDenseMatrixMarketFile(
     const std::string &path, Header *header_out = nullptr,
-    bool expand_symmetry = true) {
+    ReadOptions options = ReadOptions()) {
   std::ifstream input(path);
   if (!input) throw MMException(MMErrorList::readFileError, path);
-  return ReadDenseMatrixMarket<T>(input, header_out, expand_symmetry);
+  return ReadDenseMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline DenseMatrix<T> ReadDenseMatrixMarketFile(const std::string &path,
+                                                Header *header_out,
+                                                bool expand_symmetry) {
+  ReadOptions options;
+  options.expand_symmetry = expand_symmetry;
+  return ReadDenseMatrixMarketFile<T>(path, header_out, options);
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCSRMatrixMarketFile(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  std::ifstream input(path);
+  if (!input) throw MMException(MMErrorList::readFileError, path);
+  return ReadCSRMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCsrMatrixMarketFile(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  return ReadCSRMatrixMarketFile<T>(path, header_out, options);
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCSCMatrixMarketFile(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  std::ifstream input(path);
+  if (!input) throw MMException(MMErrorList::readFileError, path);
+  return ReadCSCMatrixMarket<T>(input, header_out, options);
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCscMatrixMarketFile(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  return ReadCSCMatrixMarketFile<T>(path, header_out, options);
+}
+
+template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const CooMatrix<T> &matrix,
+                              WriteOptions options) {
+  matrix.validate();
+  const auto header =
+      ResolveWriteHeader<T>(StorageTypes::sparse, options.header);
+  const auto entries = EntriesForCoordinateWrite(matrix, header, options);
+
+  out << header << '\n';
+  out << matrix.rows << ' ' << matrix.cols << ' ' << entries.size() << '\n';
+  for (const auto &entry : entries) {
+    out << entry.row + 1 << ' ' << entry.col + 1;
+    if (header.data_type() != DataTypes::pattern) {
+      out << ' ';
+      WriteMatrixValue(out, entry.value, header.data_type());
+    }
+    out << '\n';
+  }
 }
 
 template <typename T>
 inline void WriteMatrixMarket(std::ostream &out, const CooMatrix<T> &matrix,
                               Header header = Header()) {
-  matrix.validate();
-  header = ResolveWriteHeader<T>(StorageTypes::sparse, header);
-
-  out << header << '\n';
-  out << matrix.rows << ' ' << matrix.cols << ' ' << matrix.nnz() << '\n';
-  for (std::size_t entry = 0; entry < matrix.nnz(); ++entry) {
-    out << matrix.row_indices[entry] + 1 << ' '
-        << matrix.col_indices[entry] + 1;
-    if (header.data_type() != DataTypes::pattern) {
-      out << ' ';
-      WriteMatrixValue(out, matrix.values[entry], header.data_type());
-    }
-    out << '\n';
-  }
+  WriteOptions options;
+  options.header = header;
+  WriteMatrixMarket(out, matrix, options);
 }
 
 template <typename T>
@@ -719,9 +1042,10 @@ inline void WriteDenseValue(std::ostream &out, const DenseMatrix<T> &matrix,
 
 template <typename T>
 inline void WriteMatrixMarket(std::ostream &out, const DenseMatrix<T> &matrix,
-                              Header header = Header()) {
+                              WriteOptions options) {
   matrix.validate();
-  header = ResolveWriteHeader<T>(StorageTypes::dense, header);
+  const auto header =
+      ResolveWriteHeader<T>(StorageTypes::dense, options.header);
   if (header.data_type() == DataTypes::pattern) {
     throw MMException(MMErrorList::unsupportedField,
                       "pattern is only valid for coordinate matrices");
@@ -754,21 +1078,107 @@ inline void WriteMatrixMarket(std::ostream &out, const DenseMatrix<T> &matrix,
 }
 
 template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const DenseMatrix<T> &matrix,
+                              Header header = Header()) {
+  WriteOptions options;
+  options.header = header;
+  WriteMatrixMarket(out, matrix, options);
+}
+
+template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const CsrMatrix<T> &matrix,
+                              WriteOptions options) {
+  WriteMatrixMarket(out, ToCOO(matrix), options);
+}
+
+template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const CsrMatrix<T> &matrix,
+                              Header header = Header()) {
+  WriteOptions options;
+  options.header = header;
+  WriteMatrixMarket(out, matrix, options);
+}
+
+template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const CscMatrix<T> &matrix,
+                              WriteOptions options) {
+  WriteMatrixMarket(out, ToCOO(matrix), options);
+}
+
+template <typename T>
+inline void WriteMatrixMarket(std::ostream &out, const CscMatrix<T> &matrix,
+                              Header header = Header()) {
+  WriteOptions options;
+  options.header = header;
+  WriteMatrixMarket(out, matrix, options);
+}
+
+template <typename T>
+inline void WriteMatrixMarketFile(const std::string &path,
+                                  const CooMatrix<T> &matrix,
+                                  WriteOptions options) {
+  std::ofstream output(path);
+  if (!output) throw MMException(MMErrorList::readFileError, path);
+  WriteMatrixMarket(output, matrix, options);
+}
+
+template <typename T>
 inline void WriteMatrixMarketFile(const std::string &path,
                                   const CooMatrix<T> &matrix,
                                   Header header = Header()) {
+  WriteOptions options;
+  options.header = header;
+  WriteMatrixMarketFile(path, matrix, options);
+}
+
+template <typename T>
+inline void WriteDenseMatrixMarketFile(const std::string &path,
+                                       const DenseMatrix<T> &matrix,
+                                       WriteOptions options) {
   std::ofstream output(path);
   if (!output) throw MMException(MMErrorList::readFileError, path);
-  WriteMatrixMarket(output, matrix, header);
+  WriteMatrixMarket(output, matrix, options);
 }
 
 template <typename T>
 inline void WriteDenseMatrixMarketFile(const std::string &path,
                                        const DenseMatrix<T> &matrix,
                                        Header header = Header()) {
+  WriteOptions options;
+  options.header = header;
+  WriteDenseMatrixMarketFile(path, matrix, options);
+}
+
+template <typename T>
+inline void WriteCSRMatrixMarketFile(const std::string &path,
+                                     const CsrMatrix<T> &matrix,
+                                     WriteOptions options = WriteOptions()) {
   std::ofstream output(path);
   if (!output) throw MMException(MMErrorList::readFileError, path);
-  WriteMatrixMarket(output, matrix, header);
+  WriteMatrixMarket(output, matrix, options);
+}
+
+template <typename T>
+inline void WriteCsrMatrixMarketFile(const std::string &path,
+                                     const CsrMatrix<T> &matrix,
+                                     WriteOptions options = WriteOptions()) {
+  WriteCSRMatrixMarketFile(path, matrix, options);
+}
+
+template <typename T>
+inline void WriteCSCMatrixMarketFile(const std::string &path,
+                                     const CscMatrix<T> &matrix,
+                                     WriteOptions options = WriteOptions()) {
+  std::ofstream output(path);
+  if (!output) throw MMException(MMErrorList::readFileError, path);
+  WriteMatrixMarket(output, matrix, options);
+}
+
+template <typename T>
+inline void WriteCscMatrixMarketFile(const std::string &path,
+                                     const CscMatrix<T> &matrix,
+                                     WriteOptions options = WriteOptions()) {
+  WriteCSCMatrixMarketFile(path, matrix, options);
 }
 
 }  // namespace mmio

@@ -1,0 +1,7 @@
+{
+  "name": "mmio",
+  "version-semver": "0.2.0",
+  "description": "Header-only C++17 Matrix Market I/O library with COO, CSR, CSC, and dense matrix helpers.",
+  "homepage": "https://github.com/LLevella/mmio",
+  "license": "MIT"
+}

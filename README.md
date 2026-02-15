@@ -10,9 +10,11 @@ matrices.
 - Real, integer, unsigned integer, complex, and pattern fields.
 - General, symmetric, Hermitian, and skew-symmetric expansion while reading.
 - COO, CSR, CSC, and dense in-memory matrix structures.
-- COO to CSR/CSC/dense conversion with duplicate summation by default.
-- Matrix Market writers for COO and dense matrices.
-- CMake target and CTest-based coverage.
+- Direct COO, CSR, CSC, and dense Matrix Market read/write helpers.
+- COO/CSR/CSC/dense conversion with duplicate summation by default.
+- Triangular output for symmetric, Hermitian, and skew-symmetric sparse
+  matrices.
+- CMake target, install/export package, CTest coverage, and CI/CD.
 
 ## Build
 
@@ -29,13 +31,23 @@ cmake --install build --prefix install
 cmake --build build --target package
 ```
 
+Installed consumers can use:
+
+```cmake
+find_package(mmio REQUIRED)
+target_link_libraries(app PRIVATE mmio::mmio)
+```
+
 Release archives are created by GitHub Actions when a tag matching `v*` is
 pushed, for example:
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
+
+The repository also includes `vcpkg.json` and `conanfile.py` metadata for
+package-manager based distribution.
 
 ## Example
 
@@ -52,8 +64,7 @@ int main() {
       "3 2 -5\n");
 
   mmio::Header header;
-  auto coo = mmio::ReadMatrixMarket<double>(input, &header);
-  auto csr = mmio::ToCSR(coo);
+  auto csr = mmio::ReadCSRMatrixMarket<double>(input, &header);
 
   return csr.nnz() == 2 ? 0 : 1;
 }
@@ -97,8 +108,13 @@ input and output is column-major, as required by the format.
 ## API Notes
 
 - `ReadMatrixMarket<T>(stream)` returns `CooMatrix<T>`.
+- `ReadCSRMatrixMarket<T>(stream)` returns `CsrMatrix<T>`.
+- `ReadCSCMatrixMarket<T>(stream)` returns `CscMatrix<T>`.
 - `ReadDenseMatrixMarket<T>(stream)` returns `DenseMatrix<T>`.
-- `WriteMatrixMarket(stream, matrix)` writes COO or dense matrices.
+- `WriteMatrixMarket(stream, matrix)` writes COO, CSR, CSC, or dense matrices.
 - `ToCSR`, `ToCSC`, `ToDense`, and `ToCOO` convert between supported formats.
 - Duplicate COO entries are summed by default in sparse conversions. Pass
   `mmio::DuplicatePolicy::keep` to preserve duplicates.
+- `ReadOptions` controls symmetry expansion and duplicate handling.
+- `WriteOptions` controls headers, duplicate handling, symmetry validation, and
+  triangular output.

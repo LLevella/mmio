@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(mmio VERSION 0.1.0 LANGUAGES CXX)
+project(mmio VERSION 0.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
+
+option(MMIO_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for tests" OFF)
 
 add_library(mmio INTERFACE)
 target_include_directories(
@@ -14,6 +16,18 @@ target_compile_features(mmio INTERFACE cxx_std_17)
 
 add_executable(mmio_example src/main.cpp)
 target_link_libraries(mmio_example PRIVATE mmio)
+
+function(mmio_configure_test_target target)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /W4 /WX)
+  else()
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    if(MMIO_ENABLE_SANITIZERS)
+      target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+      target_link_options(${target} PRIVATE -fsanitize=address,undefined)
+    endif()
+  endif()
+endfunction()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -29,16 +43,19 @@ if(BUILD_TESTING)
     tests/include_mmio_matrix.cpp)
   target_link_libraries(mmio_header_self_contained PRIVATE mmio)
 
-  if(MSVC)
-    target_compile_options(mmio_tests PRIVATE /W4 /WX)
-    target_compile_options(mmio_header_self_contained PRIVATE /W4 /WX)
-  else()
-    target_compile_options(mmio_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
-    target_compile_options(mmio_header_self_contained PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  endif()
+  mmio_configure_test_target(mmio_tests)
+  mmio_configure_test_target(mmio_header_self_contained)
 
   add_test(NAME mmio_tests COMMAND mmio_tests)
   add_test(NAME mmio_header_self_contained COMMAND mmio_header_self_contained)
+  add_test(
+    NAME mmio_install_consumer
+    COMMAND
+      ${CMAKE_COMMAND}
+      -DMMIO_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -DMMIO_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+      -DMMIO_BUILD_TYPE=$<CONFIG>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/install_consumer.cmake)
 endif()
 
 install(
@@ -47,6 +64,7 @@ install(
   INCLUDES
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES README.md CHANGELOG.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 include(CMakePackageConfigHelpers)
 
@@ -78,6 +96,7 @@ install(
 set(CPACK_PACKAGE_NAME mmio)
 set(CPACK_PACKAGE_VENDOR mmio)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_GENERATOR "TGZ;ZIP")
 

@@ -67,8 +67,11 @@ void TestHeaderParsing() {
                std::string("%%MatrixMarket matrix coordinate real general"),
                "header serialization failed");
 
-  RequireMMThrow([] { mmio::Header::Parse("%%MatrixMarket vector coordinate real general"); },
-                 "invalid object was accepted");
+  RequireMMThrow(
+      [] {
+        mmio::Header::Parse("%%MatrixMarket vector coordinate real general");
+      },
+      "invalid object was accepted");
 }
 
 void TestReadCoordinateReal() {
@@ -151,6 +154,76 @@ void TestSparseConversions() {
                      "CSC rows failed");
   RequireVectorEqual(csc.values, std::vector<int>{4, 5, 3},
                      "CSC values failed");
+
+  const auto csr_coo = mmio::ToCOO(csr);
+  RequireVectorEqual(csr_coo.row_indices, std::vector<std::size_t>{0, 1, 2},
+                     "CSR to COO rows failed");
+  RequireVectorEqual(csr_coo.col_indices, std::vector<std::size_t>{2, 0, 1},
+                     "CSR to COO columns failed");
+
+  const auto csc_coo = mmio::ToCOO(csc);
+  RequireVectorEqual(csc_coo.row_indices, std::vector<std::size_t>{1, 2, 0},
+                     "CSC to COO rows failed");
+  RequireVectorEqual(csc_coo.col_indices, std::vector<std::size_t>{0, 1, 2},
+                     "CSC to COO columns failed");
+}
+
+void TestDirectCSRCSCReadWrite() {
+  std::istringstream input(
+      "%%MatrixMarket matrix coordinate integer general\n"
+      "3 3 4\n"
+      "1 3 1\n"
+      "1 3 2\n"
+      "2 1 4\n"
+      "3 2 5\n");
+
+  const auto csr = mmio::ReadCSRMatrixMarket<int>(input);
+  RequireVectorEqual(csr.row_ptr, std::vector<std::size_t>{0, 1, 2, 3},
+                     "direct CSR read row_ptr failed");
+  RequireVectorEqual(csr.col_indices, std::vector<std::size_t>{2, 0, 1},
+                     "direct CSR read columns failed");
+  RequireVectorEqual(csr.values, std::vector<int>{3, 4, 5},
+                     "direct CSR read values failed");
+
+  std::stringstream csr_output;
+  mmio::WriteMatrixMarket(csr_output, csr);
+  const auto csr_roundtrip = mmio::ReadMatrixMarket<int>(csr_output);
+  RequireVectorEqual(csr_roundtrip.values, std::vector<int>{3, 4, 5},
+                     "CSR writer roundtrip failed");
+
+  std::istringstream input_again(
+      "%%MatrixMarket matrix coordinate integer general\n"
+      "3 3 3\n"
+      "1 3 3\n"
+      "2 1 4\n"
+      "3 2 5\n");
+  const auto csc = mmio::ReadCSCMatrixMarket<int>(input_again);
+  RequireVectorEqual(csc.col_ptr, std::vector<std::size_t>{0, 1, 2, 3},
+                     "direct CSC read col_ptr failed");
+  RequireVectorEqual(csc.row_indices, std::vector<std::size_t>{1, 2, 0},
+                     "direct CSC read rows failed");
+  RequireVectorEqual(csc.values, std::vector<int>{4, 5, 3},
+                     "direct CSC read values failed");
+}
+
+void TestSparseValidation() {
+  mmio::CsrMatrix<int> invalid_csr;
+  invalid_csr.rows = 2;
+  invalid_csr.cols = 2;
+  invalid_csr.row_ptr = {0, 2, 1};
+  invalid_csr.col_indices = {0};
+  invalid_csr.values = {1};
+  RequireMMThrow([&] { invalid_csr.validate(); },
+                 "invalid CSR row_ptr was accepted");
+
+  mmio::CscMatrix<int> invalid_csc;
+  invalid_csc.rows = 2;
+  invalid_csc.cols = 2;
+  invalid_csc.col_ptr = {0, 1, 1};
+  invalid_csc.row_indices = {2};
+  invalid_csc.values = {1};
+  RequireMMThrow([&] { invalid_csc.validate(); },
+                 "invalid CSC row index was accepted");
 }
 
 void TestRoundTripCoordinate() {
@@ -209,6 +282,42 @@ void TestDenseSymmetricRead() {
   RequireEqual(dense(1, 1), 3.0, "symmetric dense diagonal 2 failed");
 }
 
+void TestSymmetricWriters() {
+  mmio::CooMatrix<int> symmetric(2, 2);
+  symmetric.push_back(0, 0, 1);
+  symmetric.push_back(0, 1, 5);
+  symmetric.push_back(1, 0, 5);
+  symmetric.push_back(1, 1, 2);
+
+  mmio::WriteOptions options;
+  options.header =
+      mmio::Header(mmio::StorageTypes::sparse, mmio::DataTypes::integer,
+                   mmio::MatrixTypes::symmetric);
+
+  std::stringstream output;
+  mmio::WriteMatrixMarket(output, symmetric, options);
+  const auto serialized = output.str();
+  Require(serialized.find("2 2 3\n") != std::string::npos,
+          "symmetric writer did not emit triangular nnz");
+  Require(serialized.find("1 2 5\n") == std::string::npos,
+          "symmetric writer emitted upper triangle");
+  Require(serialized.find("2 1 5\n") != std::string::npos,
+          "symmetric writer did not emit lower triangle");
+
+  mmio::CooMatrix<int> skew(2, 2);
+  skew.push_back(0, 0, 1);
+  mmio::WriteOptions skew_options;
+  skew_options.header =
+      mmio::Header(mmio::StorageTypes::sparse, mmio::DataTypes::integer,
+                   mmio::MatrixTypes::skewSymmetric);
+  RequireMMThrow(
+      [&] {
+        std::stringstream skew_output;
+        mmio::WriteMatrixMarket(skew_output, skew, skew_options);
+      },
+      "skew-symmetric diagonal value was accepted");
+}
+
 }  // namespace
 
 int main() {
@@ -218,8 +327,11 @@ int main() {
   TestPatternSymmetricExpansion();
   TestComplexHermitianExpansion();
   TestSparseConversions();
+  TestDirectCSRCSCReadWrite();
+  TestSparseValidation();
   TestRoundTripCoordinate();
   TestDenseArrayRead();
   TestDenseSymmetricRead();
+  TestSymmetricWriters();
   return 0;
 }
