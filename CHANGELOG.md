@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Added `SparseOrdering::preserve` for non-sorting CSR/CSC conversion when
+  duplicates should be kept.
+- Added `ReadCSRMatrixMarketFileStreamed` and
+  `ReadCSCMatrixMarketFileStreamed` two-pass file readers for large coordinate
+  matrices without materializing a COO matrix first.
+- Added deterministic fuzz-style parser regression tests.
+- Added a lightweight `mmio_benchmark` target and smoke test.
+
 ## 0.2.0
 
 - Added `ReadOptions` and `WriteOptions`.

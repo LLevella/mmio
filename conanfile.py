@@ -4,7 +4,7 @@ from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
 
 class MmioConan(ConanFile):
     name = "mmio"
-    version = "0.2.0"
+    version = "0.3.0"
     package_type = "header-library"
     license = "MIT"
     author = "LLevella"

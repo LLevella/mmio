@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(mmio VERSION 0.2.0 LANGUAGES CXX)
+project(mmio VERSION 0.3.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
 option(MMIO_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer for tests" OFF)
+option(MMIO_BUILD_BENCHMARKS "Build mmio benchmark tools" ON)
 
 add_library(mmio INTERFACE)
 target_include_directories(
@@ -29,6 +30,12 @@ function(mmio_configure_test_target target)
   endif()
 endfunction()
 
+if(MMIO_BUILD_BENCHMARKS)
+  add_executable(mmio_benchmark benchmarks/mmio_benchmark.cpp)
+  target_link_libraries(mmio_benchmark PRIVATE mmio)
+  mmio_configure_test_target(mmio_benchmark)
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
   add_executable(mmio_tests tests/mmio_tests.cpp)
@@ -48,6 +55,9 @@ if(BUILD_TESTING)
 
   add_test(NAME mmio_tests COMMAND mmio_tests)
   add_test(NAME mmio_header_self_contained COMMAND mmio_header_self_contained)
+  if(MMIO_BUILD_BENCHMARKS)
+    add_test(NAME mmio_benchmark_smoke COMMAND mmio_benchmark 32 256)
+  endif()
   add_test(
     NAME mmio_install_consumer
     COMMAND

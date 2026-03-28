@@ -1,6 +1,8 @@
 #include "mmio.h"
 
 #include <complex>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -166,6 +168,18 @@ void TestSparseConversions() {
                      "CSC to COO rows failed");
   RequireVectorEqual(csc_coo.col_indices, std::vector<std::size_t>{0, 1, 2},
                      "CSC to COO columns failed");
+
+  const auto preserved_csr =
+      mmio::ToCSR(matrix, mmio::DuplicatePolicy::keep,
+                  mmio::SparseOrdering::preserve);
+  RequireVectorEqual(preserved_csr.row_ptr,
+                     std::vector<std::size_t>{0, 2, 3, 4},
+                     "preserved CSR row_ptr failed");
+  RequireVectorEqual(preserved_csr.col_indices,
+                     std::vector<std::size_t>{2, 2, 0, 1},
+                     "preserved CSR columns failed");
+  RequireVectorEqual(preserved_csr.values, std::vector<int>{1, 2, 4, 5},
+                     "preserved CSR values failed");
 }
 
 void TestDirectCSRCSCReadWrite() {
@@ -224,6 +238,43 @@ void TestSparseValidation() {
   invalid_csc.values = {1};
   RequireMMThrow([&] { invalid_csc.validate(); },
                  "invalid CSC row index was accepted");
+}
+
+void TestStreamedSparseFileReads() {
+  const auto path =
+      std::filesystem::temp_directory_path() / "mmio_streamed_sparse_test.mtx";
+  {
+    std::ofstream file(path);
+    file << "%%MatrixMarket matrix coordinate integer symmetric\n"
+         << "3 3 3\n"
+         << "1 1 10\n"
+         << "3 1 7\n"
+         << "2 2 5\n";
+  }
+
+  mmio::ReadOptions options;
+  options.duplicate_policy = mmio::DuplicatePolicy::keep;
+  options.sparse_ordering = mmio::SparseOrdering::preserve;
+
+  const auto csr = mmio::ReadCSRMatrixMarketFileStreamed<int>(
+      path.string(), nullptr, options);
+  RequireVectorEqual(csr.row_ptr, std::vector<std::size_t>{0, 2, 3, 4},
+                     "streamed CSR row_ptr failed");
+  RequireVectorEqual(csr.col_indices, std::vector<std::size_t>{0, 2, 1, 0},
+                     "streamed CSR columns failed");
+  RequireVectorEqual(csr.values, std::vector<int>{10, 7, 5, 7},
+                     "streamed CSR values failed");
+
+  const auto csc = mmio::ReadCSCMatrixMarketFileStreamed<int>(
+      path.string(), nullptr, options);
+  RequireVectorEqual(csc.col_ptr, std::vector<std::size_t>{0, 2, 3, 4},
+                     "streamed CSC col_ptr failed");
+  RequireVectorEqual(csc.row_indices, std::vector<std::size_t>{0, 2, 1, 0},
+                     "streamed CSC rows failed");
+  RequireVectorEqual(csc.values, std::vector<int>{10, 7, 5, 7},
+                     "streamed CSC values failed");
+
+  std::filesystem::remove(path);
 }
 
 void TestRoundTripCoordinate() {
@@ -318,6 +369,40 @@ void TestSymmetricWriters() {
       "skew-symmetric diagonal value was accepted");
 }
 
+void TestMalformedInputs() {
+  const std::vector<std::string> malformed = {
+      "",
+      "%%MatrixMarket matrix coordinate real general\n1 1\n",
+      "%%MatrixMarket matrix coordinate real general\n1 1 1\n0 1 1\n",
+      "%%MatrixMarket matrix coordinate real general\n1 1 1\n1 2 1\n",
+      "%%MatrixMarket matrix coordinate complex general\n1 1 1\n1 1 1\n",
+      "%%MatrixMarket matrix array pattern general\n1 1\n1\n",
+      "not a matrix market file\n"};
+
+  for (const auto &content : malformed) {
+    RequireMMThrow(
+        [&] {
+          std::istringstream input(content);
+          (void)mmio::ReadMatrixMarket<double>(input);
+        },
+        "malformed input was accepted: " + content);
+  }
+
+  for (int seed = 0; seed < 64; ++seed) {
+    std::ostringstream generated;
+    generated << "%%MatrixMarket matrix coordinate real general\n";
+    generated << "3 3 2\n";
+    generated << ((seed % 5) - 1) << ' ' << ((seed % 7) - 2) << " value\n";
+    generated << "1 1 " << seed << "\n";
+    RequireMMThrow(
+        [&] {
+          std::istringstream input(generated.str());
+          (void)mmio::ReadMatrixMarket<double>(input);
+        },
+        "fuzz-style malformed coordinate was accepted");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -329,9 +414,11 @@ int main() {
   TestSparseConversions();
   TestDirectCSRCSCReadWrite();
   TestSparseValidation();
+  TestStreamedSparseFileReads();
   TestRoundTripCoordinate();
   TestDenseArrayRead();
   TestDenseSymmetricRead();
   TestSymmetricWriters();
+  TestMalformedInputs();
   return 0;
 }

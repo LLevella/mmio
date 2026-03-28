@@ -12,9 +12,14 @@ matrices.
 - COO, CSR, CSC, and dense in-memory matrix structures.
 - Direct COO, CSR, CSC, and dense Matrix Market read/write helpers.
 - COO/CSR/CSC/dense conversion with duplicate summation by default.
+- Optional preserve-order sparse conversion for large inputs when duplicates
+  should be kept.
+- Two-pass streamed file readers for direct CSR/CSC loading from coordinate
+  Matrix Market files.
 - Triangular output for symmetric, Hermitian, and skew-symmetric sparse
   matrices.
-- CMake target, install/export package, CTest coverage, and CI/CD.
+- CMake target, install/export package, benchmark target, CTest coverage, and
+  CI/CD.
 
 ## Build
 
@@ -22,6 +27,12 @@ matrices.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+The optional benchmark target is built by default:
+
+```sh
+./build/mmio_benchmark 1024 100000
 ```
 
 ## Install and Package
@@ -42,8 +53,8 @@ Release archives are created by GitHub Actions when a tag matching `v*` is
 pushed, for example:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.3.0
+git push origin v0.3.0
 ```
 
 The repository also includes `vcpkg.json` and `conanfile.py` metadata for
@@ -110,11 +121,18 @@ input and output is column-major, as required by the format.
 - `ReadMatrixMarket<T>(stream)` returns `CooMatrix<T>`.
 - `ReadCSRMatrixMarket<T>(stream)` returns `CsrMatrix<T>`.
 - `ReadCSCMatrixMarket<T>(stream)` returns `CscMatrix<T>`.
+- `ReadCSRMatrixMarketFileStreamed<T>(path)` and
+  `ReadCSCMatrixMarketFileStreamed<T>(path)` read coordinate files directly
+  into CSR/CSC with a two-pass path. Set `ReadOptions::duplicate_policy` to
+  `DuplicatePolicy::keep` to avoid the fallback duplicate-summing conversion.
 - `ReadDenseMatrixMarket<T>(stream)` returns `DenseMatrix<T>`.
 - `WriteMatrixMarket(stream, matrix)` writes COO, CSR, CSC, or dense matrices.
 - `ToCSR`, `ToCSC`, `ToDense`, and `ToCOO` convert between supported formats.
 - Duplicate COO entries are summed by default in sparse conversions. Pass
   `mmio::DuplicatePolicy::keep` to preserve duplicates.
-- `ReadOptions` controls symmetry expansion and duplicate handling.
+- `SparseOrdering::preserve` avoids sorting during CSR/CSC conversion when
+  duplicates are kept.
+- `ReadOptions` controls symmetry expansion, duplicate handling, and sparse
+  conversion ordering.
 - `WriteOptions` controls headers, duplicate handling, symmetry validation, and
   triangular output.

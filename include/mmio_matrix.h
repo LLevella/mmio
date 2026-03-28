@@ -23,10 +23,12 @@
 namespace mmio {
 
 enum class DuplicatePolicy { keep, sum };
+enum class SparseOrdering { sorted, preserve };
 
 struct ReadOptions {
   bool expand_symmetry = true;
   DuplicatePolicy duplicate_policy = DuplicatePolicy::sum;
+  SparseOrdering sparse_ordering = SparseOrdering::sorted;
 };
 
 struct WriteOptions {
@@ -438,8 +440,39 @@ inline std::vector<CooEntry<T>> SortedEntriesByRowColumn(
 }
 
 template <typename T>
+inline CsrMatrix<T> ToCSRPreserve(const CooMatrix<T> &matrix) {
+  matrix.validate();
+
+  CsrMatrix<T> result;
+  result.rows = matrix.rows;
+  result.cols = matrix.cols;
+  result.row_ptr.assign(result.rows + 1, 0);
+  result.col_indices.resize(matrix.nnz());
+  result.values.resize(matrix.nnz());
+
+  for (const auto row : matrix.row_indices) ++result.row_ptr[row + 1];
+  std::partial_sum(result.row_ptr.begin(), result.row_ptr.end(),
+                   result.row_ptr.begin());
+
+  auto cursor = result.row_ptr;
+  for (std::size_t entry = 0; entry < matrix.nnz(); ++entry) {
+    const auto position = cursor[matrix.row_indices[entry]]++;
+    result.col_indices[position] = matrix.col_indices[entry];
+    result.values[position] = matrix.values[entry];
+  }
+
+  return result;
+}
+
+template <typename T>
 inline CsrMatrix<T> ToCSR(const CooMatrix<T> &matrix,
-                          DuplicatePolicy policy = DuplicatePolicy::sum) {
+                          DuplicatePolicy policy = DuplicatePolicy::sum,
+                          SparseOrdering ordering = SparseOrdering::sorted) {
+  if (ordering == SparseOrdering::preserve &&
+      policy == DuplicatePolicy::keep) {
+    return ToCSRPreserve(matrix);
+  }
+
   const auto entries = SortedEntries(
       matrix,
       [](const CooEntry<T> &lhs, const CooEntry<T> &rhs) {
@@ -470,13 +503,45 @@ inline CsrMatrix<T> ToCSR(const CooMatrix<T> &matrix,
 
 template <typename T>
 inline CsrMatrix<T> ToCsr(const CooMatrix<T> &matrix,
-                          DuplicatePolicy policy = DuplicatePolicy::sum) {
-  return ToCSR(matrix, policy);
+                          DuplicatePolicy policy = DuplicatePolicy::sum,
+                          SparseOrdering ordering = SparseOrdering::sorted) {
+  return ToCSR(matrix, policy, ordering);
+}
+
+template <typename T>
+inline CscMatrix<T> ToCSCPreserve(const CooMatrix<T> &matrix) {
+  matrix.validate();
+
+  CscMatrix<T> result;
+  result.rows = matrix.rows;
+  result.cols = matrix.cols;
+  result.col_ptr.assign(result.cols + 1, 0);
+  result.row_indices.resize(matrix.nnz());
+  result.values.resize(matrix.nnz());
+
+  for (const auto col : matrix.col_indices) ++result.col_ptr[col + 1];
+  std::partial_sum(result.col_ptr.begin(), result.col_ptr.end(),
+                   result.col_ptr.begin());
+
+  auto cursor = result.col_ptr;
+  for (std::size_t entry = 0; entry < matrix.nnz(); ++entry) {
+    const auto position = cursor[matrix.col_indices[entry]]++;
+    result.row_indices[position] = matrix.row_indices[entry];
+    result.values[position] = matrix.values[entry];
+  }
+
+  return result;
 }
 
 template <typename T>
 inline CscMatrix<T> ToCSC(const CooMatrix<T> &matrix,
-                          DuplicatePolicy policy = DuplicatePolicy::sum) {
+                          DuplicatePolicy policy = DuplicatePolicy::sum,
+                          SparseOrdering ordering = SparseOrdering::sorted) {
+  if (ordering == SparseOrdering::preserve &&
+      policy == DuplicatePolicy::keep) {
+    return ToCSCPreserve(matrix);
+  }
+
   const auto entries = SortedEntries(
       matrix,
       [](const CooEntry<T> &lhs, const CooEntry<T> &rhs) {
@@ -507,8 +572,9 @@ inline CscMatrix<T> ToCSC(const CooMatrix<T> &matrix,
 
 template <typename T>
 inline CscMatrix<T> ToCsc(const CooMatrix<T> &matrix,
-                          DuplicatePolicy policy = DuplicatePolicy::sum) {
-  return ToCSC(matrix, policy);
+                          DuplicatePolicy policy = DuplicatePolicy::sum,
+                          SparseOrdering ordering = SparseOrdering::sorted) {
+  return ToCSC(matrix, policy, ordering);
 }
 
 template <typename T>
@@ -621,6 +687,13 @@ inline void AddSymmetricEntry(CooMatrix<T> &matrix, std::size_t row,
       matrix.push_back(col, row, NegatedValue(value));
       return;
   }
+}
+
+inline bool ShouldExpandSymmetry(MatrixTypes matrix_type, bool expand_symmetry,
+                                 std::size_t row, std::size_t col) {
+  return expand_symmetry && row != col &&
+         matrix_type != MatrixTypes::general &&
+         matrix_type != MatrixTypes::undefined;
 }
 
 template <typename T>
@@ -748,6 +821,52 @@ inline T ReadValue(DataTokenReader &reader, DataTypes data_type,
   return ParseMatrixValue<T>(tokens, 0, data_type, context);
 }
 
+inline std::size_t ExpectedCoordinateTokens(DataTypes data_type) {
+  if (data_type == DataTypes::pattern) return 2;
+  if (data_type == DataTypes::complex) return 4;
+  return 3;
+}
+
+struct SparseMatrixSize {
+  std::size_t rows = 0;
+  std::size_t cols = 0;
+  std::size_t entries = 0;
+};
+
+inline SparseMatrixSize ReadSparseSizeLine(std::istream &input,
+                                           std::size_t *line_number) {
+  const auto size_line = ReadDataLine(input, line_number);
+  if (size_line.empty()) throw MMException(MMErrorList::unexpectedEof);
+
+  const auto size_tokens = Split(size_line);
+  if (size_tokens.size() != 3) {
+    throw MMException(MMErrorList::invalidSize, size_line);
+  }
+
+  SparseMatrixSize size;
+  size.rows = ParseSizeToken(size_tokens[0], "sparse row count");
+  size.cols = ParseSizeToken(size_tokens[1], "sparse column count");
+  size.entries = ParseSizeToken(size_tokens[2], "sparse nnz");
+  return size;
+}
+
+template <typename T>
+inline CooEntry<T> ParseCoordinateEntryLine(const std::string &line,
+                                            const Header &header,
+                                            std::size_t rows,
+                                            std::size_t cols) {
+  const auto tokens = Split(line);
+  if (tokens.size() != ExpectedCoordinateTokens(header.data_type())) {
+    throw MMException(MMErrorList::invalidEntry, line);
+  }
+
+  const auto row = ParseCoordinateIndex(tokens[0], rows, "row index");
+  const auto col = ParseCoordinateIndex(tokens[1], cols, "column index");
+  const auto value =
+      ParseMatrixValue<T>(tokens, 2, header.data_type(), "coordinate value");
+  return {row, col, value};
+}
+
 template <typename T>
 inline DenseMatrix<T> ReadDenseBody(std::istream &input, const Header &header,
                                     std::size_t *line_number) {
@@ -813,40 +932,19 @@ inline CooMatrix<T> ReadSparseBody(std::istream &input, const Header &header,
     throw MMException(MMErrorList::unsupportedFormat, header.format_name());
   }
 
-  const auto size_line = ReadDataLine(input, line_number);
-  if (size_line.empty()) throw MMException(MMErrorList::unexpectedEof);
-
-  const auto size_tokens = Split(size_line);
-  if (size_tokens.size() != 3) {
-    throw MMException(MMErrorList::invalidSize, size_line);
-  }
-
-  const auto rows = ParseSizeToken(size_tokens[0], "sparse row count");
-  const auto cols = ParseSizeToken(size_tokens[1], "sparse column count");
-  const auto entry_count = ParseSizeToken(size_tokens[2], "sparse nnz");
-  CooMatrix<T> result(rows, cols);
-  result.reserve(CheckedProduct(entry_count, expand_symmetry ? 2 : 1,
+  const auto size = ReadSparseSizeLine(input, line_number);
+  CooMatrix<T> result(size.rows, size.cols);
+  result.reserve(CheckedProduct(size.entries, expand_symmetry ? 2 : 1,
                                 "sparse nnz reserve overflow"));
 
-  const std::size_t expected_tokens =
-      header.data_type() == DataTypes::pattern
-          ? 2
-          : header.data_type() == DataTypes::complex ? 4 : 3;
-
-  for (std::size_t entry = 0; entry < entry_count; ++entry) {
+  for (std::size_t entry = 0; entry < size.entries; ++entry) {
     const auto line = ReadDataLine(input, line_number);
     if (line.empty()) throw MMException(MMErrorList::unexpectedEof);
 
-    const auto tokens = Split(line);
-    if (tokens.size() != expected_tokens) {
-      throw MMException(MMErrorList::invalidEntry, line);
-    }
-
-    const auto row = ParseCoordinateIndex(tokens[0], rows, "row index");
-    const auto col = ParseCoordinateIndex(tokens[1], cols, "column index");
-    const auto value =
-        ParseMatrixValue<T>(tokens, 2, header.data_type(), "coordinate value");
-    AddSymmetricEntry(result, row, col, value, header.matrix_type(),
+    const auto parsed =
+        ParseCoordinateEntryLine<T>(line, header, size.rows, size.cols);
+    AddSymmetricEntry(result, parsed.row, parsed.col, parsed.value,
+                      header.matrix_type(),
                       expand_symmetry);
   }
 
@@ -911,7 +1009,7 @@ inline CsrMatrix<T> ReadCSRMatrixMarket(std::istream &input,
                                         Header *header_out = nullptr,
                                         ReadOptions options = ReadOptions()) {
   return ToCSR(ReadMatrixMarket<T>(input, header_out, options),
-               options.duplicate_policy);
+               options.duplicate_policy, options.sparse_ordering);
 }
 
 template <typename T>
@@ -926,7 +1024,7 @@ inline CscMatrix<T> ReadCSCMatrixMarket(std::istream &input,
                                         Header *header_out = nullptr,
                                         ReadOptions options = ReadOptions()) {
   return ToCSC(ReadMatrixMarket<T>(input, header_out, options),
-               options.duplicate_policy);
+               options.duplicate_policy, options.sparse_ordering);
 }
 
 template <typename T>
@@ -1002,6 +1100,172 @@ inline CscMatrix<T> ReadCscMatrixMarketFile(
     const std::string &path, Header *header_out = nullptr,
     ReadOptions options = ReadOptions()) {
   return ReadCSCMatrixMarketFile<T>(path, header_out, options);
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCSRMatrixMarketFileStreamed(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  if (options.duplicate_policy != DuplicatePolicy::keep) {
+    return ReadCSRMatrixMarketFile<T>(path, header_out, options);
+  }
+
+  std::ifstream count_input(path);
+  if (!count_input) throw MMException(MMErrorList::readFileError, path);
+
+  Header header;
+  count_input >> header;
+  if (header_out != nullptr) *header_out = header;
+  if (!header.is_sparse()) {
+    return ReadCSRMatrixMarketFile<T>(path, header_out, options);
+  }
+
+  std::size_t line_number = 1;
+  const auto size = ReadSparseSizeLine(count_input, &line_number);
+
+  CsrMatrix<T> result;
+  result.rows = size.rows;
+  result.cols = size.cols;
+  result.row_ptr.assign(result.rows + 1, 0);
+
+  for (std::size_t entry = 0; entry < size.entries; ++entry) {
+    const auto line = ReadDataLine(count_input, &line_number);
+    if (line.empty()) throw MMException(MMErrorList::unexpectedEof);
+    const auto parsed =
+        ParseCoordinateEntryLine<T>(line, header, size.rows, size.cols);
+    ++result.row_ptr[parsed.row + 1];
+    if (ShouldExpandSymmetry(header.matrix_type(), options.expand_symmetry,
+                             parsed.row, parsed.col)) {
+      ++result.row_ptr[parsed.col + 1];
+    }
+  }
+
+  std::partial_sum(result.row_ptr.begin(), result.row_ptr.end(),
+                   result.row_ptr.begin());
+  result.col_indices.resize(result.row_ptr.back());
+  result.values.resize(result.row_ptr.back());
+
+  std::ifstream fill_input(path);
+  if (!fill_input) throw MMException(MMErrorList::readFileError, path);
+
+  Header fill_header;
+  fill_input >> fill_header;
+  (void)fill_header;
+  line_number = 1;
+  (void)ReadSparseSizeLine(fill_input, &line_number);
+
+  auto cursor = result.row_ptr;
+  const auto store = [&result, &cursor](std::size_t row, std::size_t col,
+                                        const T &value) {
+    const auto position = cursor[row]++;
+    result.col_indices[position] = col;
+    result.values[position] = value;
+  };
+
+  for (std::size_t entry = 0; entry < size.entries; ++entry) {
+    const auto line = ReadDataLine(fill_input, &line_number);
+    if (line.empty()) throw MMException(MMErrorList::unexpectedEof);
+    const auto parsed =
+        ParseCoordinateEntryLine<T>(line, header, size.rows, size.cols);
+    store(parsed.row, parsed.col, parsed.value);
+    if (ShouldExpandSymmetry(header.matrix_type(), options.expand_symmetry,
+                             parsed.row, parsed.col)) {
+      store(parsed.col, parsed.row,
+            CounterpartValue(parsed.value, header.matrix_type()));
+    }
+  }
+
+  return result;
+}
+
+template <typename T>
+inline CsrMatrix<T> ReadCsrMatrixMarketFileStreamed(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  return ReadCSRMatrixMarketFileStreamed<T>(path, header_out, options);
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCSCMatrixMarketFileStreamed(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  if (options.duplicate_policy != DuplicatePolicy::keep) {
+    return ReadCSCMatrixMarketFile<T>(path, header_out, options);
+  }
+
+  std::ifstream count_input(path);
+  if (!count_input) throw MMException(MMErrorList::readFileError, path);
+
+  Header header;
+  count_input >> header;
+  if (header_out != nullptr) *header_out = header;
+  if (!header.is_sparse()) {
+    return ReadCSCMatrixMarketFile<T>(path, header_out, options);
+  }
+
+  std::size_t line_number = 1;
+  const auto size = ReadSparseSizeLine(count_input, &line_number);
+
+  CscMatrix<T> result;
+  result.rows = size.rows;
+  result.cols = size.cols;
+  result.col_ptr.assign(result.cols + 1, 0);
+
+  for (std::size_t entry = 0; entry < size.entries; ++entry) {
+    const auto line = ReadDataLine(count_input, &line_number);
+    if (line.empty()) throw MMException(MMErrorList::unexpectedEof);
+    const auto parsed =
+        ParseCoordinateEntryLine<T>(line, header, size.rows, size.cols);
+    ++result.col_ptr[parsed.col + 1];
+    if (ShouldExpandSymmetry(header.matrix_type(), options.expand_symmetry,
+                             parsed.row, parsed.col)) {
+      ++result.col_ptr[parsed.row + 1];
+    }
+  }
+
+  std::partial_sum(result.col_ptr.begin(), result.col_ptr.end(),
+                   result.col_ptr.begin());
+  result.row_indices.resize(result.col_ptr.back());
+  result.values.resize(result.col_ptr.back());
+
+  std::ifstream fill_input(path);
+  if (!fill_input) throw MMException(MMErrorList::readFileError, path);
+
+  Header fill_header;
+  fill_input >> fill_header;
+  (void)fill_header;
+  line_number = 1;
+  (void)ReadSparseSizeLine(fill_input, &line_number);
+
+  auto cursor = result.col_ptr;
+  const auto store = [&result, &cursor](std::size_t row, std::size_t col,
+                                        const T &value) {
+    const auto position = cursor[col]++;
+    result.row_indices[position] = row;
+    result.values[position] = value;
+  };
+
+  for (std::size_t entry = 0; entry < size.entries; ++entry) {
+    const auto line = ReadDataLine(fill_input, &line_number);
+    if (line.empty()) throw MMException(MMErrorList::unexpectedEof);
+    const auto parsed =
+        ParseCoordinateEntryLine<T>(line, header, size.rows, size.cols);
+    store(parsed.row, parsed.col, parsed.value);
+    if (ShouldExpandSymmetry(header.matrix_type(), options.expand_symmetry,
+                             parsed.row, parsed.col)) {
+      store(parsed.col, parsed.row,
+            CounterpartValue(parsed.value, header.matrix_type()));
+    }
+  }
+
+  return result;
+}
+
+template <typename T>
+inline CscMatrix<T> ReadCscMatrixMarketFileStreamed(
+    const std::string &path, Header *header_out = nullptr,
+    ReadOptions options = ReadOptions()) {
+  return ReadCSCMatrixMarketFileStreamed<T>(path, header_out, options);
 }
 
 template <typename T>
