@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mmio Deployment</title>
+  <style>
+    body { color: #1f2933; font-family: system-ui, sans-serif; line-height: 1.55; margin: 0 auto; max-width: 920px; padding: 32px 20px 56px; }
+    code, pre { background: #f3f4f6; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    code { padding: 1px 4px; }
+    pre { overflow-x: auto; padding: 14px; }
+    a { color: #075985; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">Back to mmio</a></p>
+  <h1>Deployment</h1>
+
+  <h2>GitHub Releases</h2>
+  <p>
+    Tags matching <code>v*</code> trigger CI, sanitizer checks, CPack archive
+    generation, SHA256 checksum generation, and GitHub Release publishing.
+  </p>
+
+  <pre><code>git tag v1.0.0
+git push origin v1.0.0</code></pre>
+
+  <h2>Package Managers</h2>
+  <p>
+    The repository includes a <code>vcpkg.json</code> manifest and
+    <code>conanfile.py</code> recipe metadata for package-manager workflows.
+  </p>
+
+  <h2>Docs</h2>
+  <p>
+    The <code>Docs</code> GitHub Actions workflow can be launched manually to
+    publish this static documentation through GitHub Pages.
+  </p>
+</body>
+</html>

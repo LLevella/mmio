@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+title: mmio
+message: "If you use mmio, please cite the repository release."
+type: software
+authors:
+  - family-names: Khomutova
+    given-names: Irina
+repository-code: "https://github.com/LLevella/mmio"
+url: "https://github.com/LLevella/mmio"
+license: MIT
+version: 1.0.0
+date-released: 2026-05-08
+abstract: "Header-only C++17 Matrix Market I/O library with COO, CSR, CSC, and dense matrix helpers."

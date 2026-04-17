@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mmio API Notes</title>
+  <style>
+    body { color: #1f2933; font-family: system-ui, sans-serif; line-height: 1.55; margin: 0 auto; max-width: 920px; padding: 32px 20px 56px; }
+    code, pre { background: #f3f4f6; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    code { padding: 1px 4px; }
+    pre { overflow-x: auto; padding: 14px; }
+    a { color: #075985; }
+  </style>
+</head>
+<body>
+  <p><a href="index.html">Back to mmio</a></p>
+  <h1>API Notes</h1>
+
+  <h2>Matrix Types</h2>
+  <ul>
+    <li><code>mmio::CooMatrix&lt;T&gt;</code></li>
+    <li><code>mmio::CsrMatrix&lt;T&gt;</code></li>
+    <li><code>mmio::CscMatrix&lt;T&gt;</code></li>
+    <li><code>mmio::DenseMatrix&lt;T&gt;</code></li>
+  </ul>
+
+  <h2>Readers</h2>
+  <ul>
+    <li><code>ReadMatrixMarket&lt;T&gt;(stream)</code></li>
+    <li><code>ReadCSRMatrixMarket&lt;T&gt;(stream)</code></li>
+    <li><code>ReadCSCMatrixMarket&lt;T&gt;(stream)</code></li>
+    <li><code>ReadDenseMatrixMarket&lt;T&gt;(stream)</code></li>
+    <li><code>ReadCSRMatrixMarketFileStreamed&lt;T&gt;(path)</code></li>
+    <li><code>ReadCSCMatrixMarketFileStreamed&lt;T&gt;(path)</code></li>
+  </ul>
+
+  <h2>Writers</h2>
+  <p>
+    <code>WriteMatrixMarket(stream, matrix)</code> supports COO, CSR, CSC, and
+    dense matrices.
+  </p>
+
+  <h2>Options</h2>
+  <ul>
+    <li><code>ReadOptions</code>: symmetry expansion, duplicate handling, sparse ordering.</li>
+    <li><code>WriteOptions</code>: header, duplicate handling, symmetry validation, triangular output.</li>
+    <li><code>DuplicatePolicy::sum</code> and <code>DuplicatePolicy::keep</code>.</li>
+    <li><code>SparseOrdering::sorted</code> and <code>SparseOrdering::preserve</code>.</li>
+  </ul>
+</body>
+</html>

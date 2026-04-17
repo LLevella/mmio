@@ -1,7 +1,8 @@
 # mmio
 
 Header-only C++17 utilities for reading, writing, and converting Matrix Market
-matrices.
+matrices. Version `1.0.0` declares the public API stable for the supported
+matrix structures, readers, writers, options, and conversion helpers.
 
 ## Features
 
@@ -18,8 +19,8 @@ matrices.
   Matrix Market files.
 - Triangular output for symmetric, Hermitian, and skew-symmetric sparse
   matrices.
-- CMake target, install/export package, benchmark target, CTest coverage, and
-  CI/CD.
+- CMake target, install/export package, `add_subdirectory` support, benchmark
+  target, CTest coverage, and CI/CD.
 
 ## Build
 
@@ -53,12 +54,15 @@ Release archives are created by GitHub Actions when a tag matching `v*` is
 pushed, for example:
 
 ```sh
-git tag v0.3.0
-git push origin v0.3.0
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 The repository also includes `vcpkg.json` and `conanfile.py` metadata for
 package-manager based distribution.
+
+Release archives include SHA256 checksum files. Static docs live in `docs/`
+and can be published with the manual `Docs` GitHub Actions workflow.
 
 ## Example
 
@@ -136,3 +140,14 @@ input and output is column-major, as required by the format.
   conversion ordering.
 - `WriteOptions` controls headers, duplicate handling, symmetry validation, and
   triangular output.
+
+## Stable API
+
+The `1.x` release line keeps the names and core semantics of these public
+types stable:
+
+- `Header`, `MMException`, and Matrix Market enum types.
+- `CooMatrix<T>`, `CsrMatrix<T>`, `CscMatrix<T>`, `DenseMatrix<T>`.
+- `ReadOptions`, `WriteOptions`, `DuplicatePolicy`, `SparseOrdering`.
+- `Read*MatrixMarket*`, `Write*MatrixMarket*`, `ToCOO`, `ToCSR`, `ToCSC`,
+  `ToDense`.

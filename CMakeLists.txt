@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(mmio VERSION 0.3.0 LANGUAGES CXX)
+project(
+  mmio
+  VERSION 1.0.0
+  DESCRIPTION "Header-only C++17 Matrix Market I/O library"
+  HOMEPAGE_URL "https://github.com/LLevella/mmio"
+  LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
@@ -8,6 +13,7 @@ option(MMIO_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSani
 option(MMIO_BUILD_BENCHMARKS "Build mmio benchmark tools" ON)
 
 add_library(mmio INTERFACE)
+add_library(mmio::mmio ALIAS mmio)
 target_include_directories(
   mmio
   INTERFACE
@@ -59,6 +65,14 @@ if(BUILD_TESTING)
     add_test(NAME mmio_benchmark_smoke COMMAND mmio_benchmark 32 256)
   endif()
   add_test(
+    NAME mmio_add_subdirectory_consumer
+    COMMAND
+      ${CMAKE_COMMAND}
+      -DMMIO_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -DMMIO_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+      -DMMIO_BUILD_TYPE=$<CONFIG>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/add_subdirectory_consumer.cmake)
+  add_test(
     NAME mmio_install_consumer
     COMMAND
       ${CMAKE_COMMAND}
@@ -74,7 +88,9 @@ install(
   INCLUDES
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES README.md CHANGELOG.md LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(FILES README.md CHANGELOG.md LICENSE CONTRIBUTING.md SECURITY.md
+              CITATION.cff DESTINATION ${CMAKE_INSTALL_DOCDIR})
+install(DIRECTORY docs/ DESTINATION ${CMAKE_INSTALL_DOCDIR}/docs)
 
 include(CMakePackageConfigHelpers)
 
@@ -108,6 +124,7 @@ set(CPACK_PACKAGE_VENDOR mmio)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_PACKAGE_CHECKSUM SHA256)
 set(CPACK_GENERATOR "TGZ;ZIP")
 
 include(CPack)

@@ -87,6 +87,7 @@ jobs:
         path: |
           build/mmio-*.tar.gz
           build/mmio-*.zip
+          build/mmio-*.sha256
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
@@ -94,4 +95,5 @@ jobs:
         files: |
           build/mmio-*.tar.gz
           build/mmio-*.zip
+          build/mmio-*.sha256
         generate_release_notes: true

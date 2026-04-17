@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0
+
+- Declared the stable C++17 API surface for COO, CSR, CSC, dense matrices,
+  Matrix Market readers/writers, options, and conversion helpers.
+- Added the `mmio::mmio` build-tree target alias for `add_subdirectory`
+  consumers.
+- Added an `add_subdirectory` consumer test.
+- Added release archive SHA256 checksum generation.
+- Added static documentation and a manual GitHub Pages deployment workflow.
+- Added citation, contributing, and security metadata.
+
 ## 0.3.0
 
 - Added `SparseOrdering::preserve` for non-sorting CSR/CSC conversion when
